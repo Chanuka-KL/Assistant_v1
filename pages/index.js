@@ -1,58 +1,78 @@
-import { useState } from 'react';
+  
+import express from "express";  
+import axios from "axios";  
+import OpenAI from "openai";  
+import dotenv from "dotenv";  
 
-export default function Home() {
-  const [city, setCity] = useState('');
-  const [weather, setWeather] = useState(null);
-  const [news, setNews] = useState([]);
-  const [chatInput, setChatInput] = useState('');
-  const [chatResponse, setChatResponse] = useState('');
+dotenv.config();  
+const app = express();  
+const PORT = process.env.PORT || 3000;  
 
-  const getWeather = async () => {
-    const res = await fetch(`/api/weather?city=${city}`);
-    const data = await res.json();
-    setWeather(data);
-  };
+const openai = new OpenAI({  
+    baseURL: "https://models.inference.ai.azure.com",  
+    apiKey: process.env.GITHUB_TOKEN  
+});  
 
-  const getNews = async () => {
-    const res = await fetch('/api/news');
-    const data = await res.json();
-    setNews(data);
-  };
+// Weather API Configuration  
+const WEATHER_API_KEY = process.env.WEATHER_API_KEY;  
+const WEATHER_API_URL = "https://api.openweathermap.org/data/2.5/weather";  
 
-  const sendMessage = async () => {
-    const res = await fetch('/api/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: chatInput }),
-    });
-    const data = await res.json();
-    setChatResponse(data.reply);
-  };
+// News API Configuration (AdaDerana RSS)  
+const NEWS_API_URL = "https://www.adaderana.lk/rss.php";  
 
-  return (
-    <div style={{ padding: '20px', fontFamily: 'Arial' }}>
-      <h1>AI Assistant</h1>
+app.use(express.json());  
 
-      <div>
-        <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="Enter city" />
-        <button onClick={getWeather}>Get Weather</button>
-        {weather && <p>{weather.name}: {weather.main.temp}°C</p>}
-      </div>
+// Function to fetch weather  
+async function getWeather(city) {  
+    try {  
+        const response = await axios.get(WEATHER_API_URL, {  
+            params: { q: city, appid: WEATHER_API_KEY, units: "metric" }  
+        });  
+        const { temp } = response.data.main;  
+        const { description } = response.data.weather[0];  
+        return `The weather in ${city} is ${temp}°C with ${description}.`;  
+    } catch (error) {  
+        return "Sorry, I couldn't fetch the weather.";  
+    }  
+}  
 
-      <div>
-        <button onClick={getNews}>Get News</button>
-        <ul>
-          {news.map((item, index) => (
-            <li key={index}><a href={item.link}>{item.title}</a></li>
-          ))}
-        </ul>
-      </div>
+// Function to fetch news  
+async function getNews() {  
+    try {  
+        const response = await axios.get(NEWS_API_URL);  
+        return "Latest news: " + response.data.slice(0, 300) + "...";  
+    } catch (error) {  
+        return "Sorry, I couldn't fetch the news.";  
+    }  
+}  
 
-      <div>
-        <input value={chatInput} onChange={(e) => setChatInput(e.target.value)} placeholder="Ask AI..." />
-        <button onClick={sendMessage}>Send</button>
-        {chatResponse && <p>AI: {chatResponse}</p>}
-      </div>
-    </div>
-  );
-}
+app.post("/chat", async (req, res) => {  
+    const userMessage = req.body.message.toLowerCase();  
+
+    if (userMessage.includes("weather")) {  
+        const city = userMessage.split("in ")[1] || "Colombo";  
+        const weather = await getWeather(city);  
+        return res.json({ response: weather });  
+    }  
+
+    if (userMessage.includes("news")) {  
+        const news = await getNews();  
+        return res.json({ response: news });  
+    }  
+
+    // Default AI response  
+    const response = await openai.chat.completions.create({  
+        messages: [  
+            { role: "system", content: "You are a helpful assistant." },  
+            { role: "user", content: userMessage }  
+        ],  
+        model: "gpt-4o",  
+        temperature: 1,  
+        max_tokens: 4096,  
+        top_p: 1  
+    });  
+
+    res.json({ response: response.choices[0].message.content });  
+});  
+
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));  
